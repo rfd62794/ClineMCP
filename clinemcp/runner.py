@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
 import subprocess
@@ -9,6 +10,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from clinemcp.sessions import SessionStore
+
+logger = logging.getLogger("clinemcp.runner")
 
 CLINE_PATH = os.environ.get("CLINE_PATH", "cline")
 DEFAULT_TIMEOUT = int(os.environ.get("CLINE_TIMEOUT_SECONDS", "300"))
@@ -46,11 +49,14 @@ async def start_session(
 
     Runs as background task — fire and forget.
     """
+    logger.info(f"Starting session {session_id} with task: {task[:50]}...")
+    
     # Mark session as running
     started_at = datetime.now(timezone.utc).isoformat()
     await sessions.update_session(
         session_id, status="running", started_at=started_at
     )
+    logger.info(f"Session {session_id} marked as running")
 
     # Build command (asyncio.create_subprocess_exec only — never shell=True)
     cmd = [
@@ -65,6 +71,8 @@ async def start_session(
         "--hooks-dir", "C:\\Users\\cheat\\.cline\\hooks",
     ]
 
+    logger.info(f"Command: {' '.join(cmd)}")
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -72,8 +80,10 @@ async def start_session(
             stderr=asyncio.subprocess.PIPE,
         )
         _active_processes[session_id] = proc
+        logger.info(f"Subprocess started with PID: {proc.pid}")
 
         try:
+            logger.info(f"Waiting for subprocess {session_id} to complete...")
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=DEFAULT_TIMEOUT + 30
             )
@@ -82,16 +92,32 @@ async def start_session(
             )
             exit_code = proc.returncode
             status = "complete" if exit_code == 0 else "failed"
+            logger.info(f"Subprocess {session_id} completed with exit code: {exit_code}, status: {status}")
 
             # Parse JSON output for enriched session data
             parsed = _parse_json_output(output)
+            logger.info(f"Parsed output: iterations={parsed.get('iterations')}, tokens={parsed.get('input_tokens')}/{parsed.get('output_tokens')}")
 
         except asyncio.TimeoutError:
+            logger.error(f"Session {session_id} timed out")
             proc.kill()
             output = "Session timed out"
             exit_code = -1
             status = "failed"
             parsed = {}
+
+        except Exception as e:
+            logger.error(f"Exception during subprocess execution for {session_id}: {e}")
+            completed_at = datetime.now(timezone.utc).isoformat()
+            await sessions.update_session(
+                session_id,
+                status="failed",
+                output=str(e),
+                exit_code=-1,
+                error=str(e),
+                completed_at=completed_at,
+            )
+            return
 
         completed_at = datetime.now(timezone.utc).isoformat()
         await sessions.update_session(
@@ -106,8 +132,10 @@ async def start_session(
             input_tokens=parsed.get("input_tokens"),
             output_tokens=parsed.get("output_tokens"),
         )
+        logger.info(f"Session {session_id} updated in database with status: {status}")
 
     except Exception as e:
+        logger.error(f"Exception in start_session for {session_id}: {e}")
         completed_at = datetime.now(timezone.utc).isoformat()
         await sessions.update_session(
             session_id,
@@ -120,6 +148,7 @@ async def start_session(
 
     finally:
         _active_processes.pop(session_id, None)
+        logger.info(f"Session {session_id} cleaned up from active processes")
 
 
 async def cancel_session(session_id: str, sessions: SessionStore) -> bool:
