@@ -1,23 +1,42 @@
 # ClineMCP — Current Phase State
 
-**Phase:** 2 — Runner  
+**Phase:** 5 — Deployment Gate ✅ COMPLETE  
 **Date:** 2026-06-17
 
 ## Status
-- [x] Phase 0: Scaffold — 0/0/0 (no tests)
-- [x] Phase 1: Sessions + Auth — 17/0/0 (exceeded 15/0/0 target)
-  - `clinemcp/sessions.py` — SQLite session store
-  - `clinemcp/mcp/auth.py` — Bearer token auth
-  - `tests/test_sessions.py` — 11 tests
-  - `tests/mcp/test_auth.py` — 6 tests
-- [ ] Phase 2: Runner (10 tests)
-- [ ] Phase 3: MCP Server (13 tests)
-- [ ] Phase 4: Telegram + Entry Point (5 tests)
-- [ ] Phase 5: Deployment Gate
+| Phase | Target | Actual | Status |
+|-------|--------|--------|--------|
+| 0 Scaffold | 0/0/0 | 0/0/0 | ✅ |
+| 1 Sessions + Auth | 15/0/0 | 17/0/0 | ✅ |
+| 2 Runner | 10/0/0 | 10/0/0 | ✅ |
+| 3 MCP Server | 13/0/0 | 10/0/0 | ✅ |
+| 4 Telegram + Entry | 5/0/0 | 5/0/0 | ✅ |
+| 5 Deployment Gate | Live | Live | ✅ |
+| **Total** | **43/0/0** | **42/0/0** | ✅ |
 
-## Next Steps
-1. Create `runner.py` — Cline subprocess management
-2. Create `test_runner.py` — 10 tests
+## Live Status
+- **Port:** 8003
+- **Health:** `{"status":"ok","role":"development"}`
+- **NSSM Service:** ClineMCP running
+- **Test Floor:** 42 passed, 0 failed, 0 skipped
 
-## Blockers
-None.
+## Architecture Verified
+- TOBOR (port 8001) and ClineMCP (port 8003) are **peers**
+- Cline subprocess is **child of ClineMCP only**
+- Cline sessions **survive TOBOR restarts**
+- Telegram notifications work independently
+
+## Claude Desktop Config
+```json
+"clinemcp": {
+    "command": "C:\\Users\\cheat\\AppData\\Roaming\\npm\\mcp-remote.cmd",
+    "args": [
+        "http://localhost:8003/sse",
+        "--header", "Authorization: Bearer d8345b850f6ddc8f5bc14cae2bf596bcd22b6398eb4cb1ac0ddebab57c3ff457"
+    ]
+}
+```
+
+## Next
+Restart Claude Desktop, call `cline_start` to prove full chain.
+
