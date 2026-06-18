@@ -1,0 +1,27 @@
+# ClineMCP — Cline Rules
+
+## Architecture
+- ClineMCP is a standalone MCP server on port 8003
+- TOBOR and ClineMCP are peers — neither is parent of the other
+- Cline subprocess is child of ClineMCP only
+- SQLite for session persistence
+- Telegram via direct httpx (no TOBOR dependency)
+
+## Code Patterns
+- asyncio.create_subprocess_exec only — never shell=True
+- Fire-and-forget background tasks for Cline execution
+- Sessions persisted before subprocess starts
+- One active session at a time (MVP)
+- --auto-approve true is hardcoded
+
+## Testing
+- Target: 40 passed, 0 failed, 0 skipped
+- Coverage: 80%+ per module and overall
+- pytest --tb=no -q for pre-flight check
+
+## State Machine
+pending → running → (complete | failed) → completion_signaled
+Any state → cancelled via cline_cancel()
+
+## Tool Return Format
+All tools return JSON via TextContent. No exceptions raised to MCP.
