@@ -1,5 +1,6 @@
 """FastAPI + MCP SSE server (adapted from TOBOR)."""
 
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -12,6 +13,8 @@ from mcp.types import TextContent
 
 from clinemcp.mcp.auth import verify_token_dependency
 from clinemcp.sessions import SessionStore
+
+logger = logging.getLogger(__name__)
 
 # Get configuration from environment
 MCP_PORT = int(os.environ.get("MCP_PORT", "8003"))
@@ -111,8 +114,16 @@ def create_app() -> FastAPI:
             mcp_server = request.app.state.mcp_server
 
             logger.info(f"Starting SSE connection for session {session_id}")
+            logger.info(f"Request scope: {request.scope}")
+            logger.info(f"Request receive: {request.receive}")
+            logger.info(f"Request send: {getattr(request, '_send', 'not available')}")
+            
+            # Use the proper send function from the scope
+            async def send(message):
+                await request._send(message)
+            
             async with sse_transport.connect_sse(
-                request.scope, request.receive, request._send
+                request.scope, request.receive, send
             ) as (read_stream, write_stream):
                 await mcp_server.run(
                     read_stream,
