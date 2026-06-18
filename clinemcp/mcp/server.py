@@ -94,32 +94,37 @@ def create_app() -> FastAPI:
     async def sse_endpoint(request: Request):
         """MCP SSE endpoint with auth and session management."""
         logger.info(f"SSE endpoint accessed from {request.client.host if request.client else 'unknown'}")
-        # Check for existing session ID
-        session_id = request.headers.get("Mcp-Session-Id")
+        try:
+            # Check for existing session ID
+            session_id = request.headers.get("Mcp-Session-Id")
 
-        if session_id is not None:
-            # Stale session check
-            if session_id not in ACTIVE_SESSIONS:
-                return JSONResponse({"error": "session_expired"}, status_code=404)
-        else:
-            # New connection — issue session ID
-            session_id = str(uuid.uuid4())
-            ACTIVE_SESSIONS.add(session_id)
+            if session_id is not None:
+                # Stale session check
+                if session_id not in ACTIVE_SESSIONS:
+                    return JSONResponse({"error": "session_expired"}, status_code=404)
+            else:
+                # New connection — issue session ID
+                session_id = str(uuid.uuid4())
+                ACTIVE_SESSIONS.add(session_id)
 
-        sse_transport = request.app.state.sse_transport
-        mcp_server = request.app.state.mcp_server
+            sse_transport = request.app.state.sse_transport
+            mcp_server = request.app.state.mcp_server
 
-        async with sse_transport.connect_sse(
-            request.scope, request.receive, request._send
-        ) as (read_stream, write_stream):
-            await mcp_server.run(
-                read_stream,
-                write_stream,
-                mcp_server.create_initialization_options(),
-            )
+            logger.info(f"Starting SSE connection for session {session_id}")
+            async with sse_transport.connect_sse(
+                request.scope, request.receive, request._send
+            ) as (read_stream, write_stream):
+                await mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    mcp_server.create_initialization_options(),
+                )
 
-        # Return session ID in response header
-        return Response(headers={"Mcp-Session-Id": session_id})
+            # Return session ID in response header
+            return Response(headers={"Mcp-Session-Id": session_id})
+        except Exception as e:
+            logger.error(f"SSE endpoint error: {e}", exc_info=True)
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     @app.post("/messages/", dependencies=[Depends(verify_token_dependency)])
     async def messages_endpoint(request: Request):
