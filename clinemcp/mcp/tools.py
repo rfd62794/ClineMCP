@@ -14,9 +14,10 @@ from clinemcp.telegram import send_message
 
 async def handle_cline_start(arguments: dict) -> str:
     """Spawn Cline session, return session_id."""
+    import os
     task = arguments.get("task", "")
     model = arguments.get("model", "qwen2.5-coder:7b")
-    cwd = arguments.get("cwd", "C:\\Github\\DuggerBot")
+    cwd = arguments.get("cwd", os.environ.get("CLINE_DEFAULT_CWD", os.getcwd()))
 
     # Check for active session (MVP: one at a time)
     store = SessionStore()
