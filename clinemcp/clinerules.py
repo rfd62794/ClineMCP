@@ -81,7 +81,7 @@ def ensure_clinerules(repo_path: str) -> dict:
     clinerules_path = path / CLINERULES_FILENAME
 
     if clinerules_path.exists():
-        logger.info("ensure_clinerules.exists", repo_path=repo_path)
+        logger.info(f"ensure_clinerules.exists: {repo_path}")
         return {
             "repo_path": repo_path,
             "existed": True,
@@ -94,7 +94,7 @@ def ensure_clinerules(repo_path: str) -> dict:
     stack = _detect_stack(path)
     content = _generate_clinerules(path, stack)
     clinerules_path.write_text(content, encoding="utf-8")
-    logger.info("ensure_clinerules.generated", repo_path=repo_path, stack=stack)
+    logger.info(f"ensure_clinerules.generated: {repo_path}, stack={stack}")
 
     return {
         "repo_path": repo_path,
