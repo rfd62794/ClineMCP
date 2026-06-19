@@ -1,5 +1,6 @@
 """FastAPI + MCP SSE server (adapted from TOBOR)."""
 
+import asyncio
 import logging
 import os
 import uuid
@@ -12,6 +13,7 @@ from mcp.server.sse import SseServerTransport
 from mcp.types import TextContent
 
 from clinemcp.mcp.auth import verify_token_dependency
+from clinemcp.runner import hub_watchdog
 from clinemcp.sessions import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -74,9 +76,19 @@ async def lifespan(app: FastAPI):
     app.state.mcp_server = mcp_server
     app.state.sse_transport = sse_transport
 
+    # Start hub watchdog
+    watchdog_task = asyncio.create_task(hub_watchdog(interval_seconds=60))
+    logger.info("hub_watchdog.started")
+
     yield
 
-    # Shutdown (nothing special needed)
+    # Shutdown
+    watchdog_task.cancel()
+    try:
+        await watchdog_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("hub_watchdog.stopped")
 
 
 def create_app() -> FastAPI:

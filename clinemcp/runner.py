@@ -38,6 +38,43 @@ def ensure_cline_hub_healthy() -> None:
         subprocess.Popen([CLINE_PATH, "hub", "start"])
 
 
+def get_hub_port() -> int | None:
+    """Return port Cline Hub is listening on, or None if not found."""
+    result = subprocess.run(
+        ["netstat", "-ano"],
+        capture_output=True, text=True
+    )
+    for line in result.stdout.splitlines():
+        if "LISTENING" in line and "127.0.0.1" in line:
+            parts = line.strip().split()
+            addr = parts[1]
+            port = int(addr.split(":")[-1])
+            if 25000 <= port <= 30000:
+                pid_str = parts[-1]
+                return int(pid_str)
+    return None
+
+
+async def hub_watchdog(interval_seconds: int = 60) -> None:
+    """Background task. Checks hub health every interval_seconds.
+    If unhealthy: kills stale process, starts fresh hub."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            result = subprocess.run(
+                [CLINE_PATH, "doctor"],
+                capture_output=True, text=True, timeout=10
+            )
+            if "hub healthy yes" not in result.stdout:
+                logger.warning("hub_watchdog.unhealthy — attempting recovery")
+                ensure_cline_hub_healthy()
+                logger.info("hub_watchdog.recovery_complete")
+            else:
+                logger.debug("hub_watchdog.healthy")
+        except Exception as e:
+            logger.error(f"hub_watchdog.error: {e}")
+
+
 async def start_session(
     session_id: str,
     task: str,

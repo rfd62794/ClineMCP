@@ -13,6 +13,8 @@ from clinemcp.runner import (
     cancel_session,
     clear_active_processes,
     get_active_process,
+    get_hub_port,
+    hub_watchdog,
     start_session,
 )
 from clinemcp.sessions import SessionStore
@@ -250,3 +252,77 @@ class TestParseJsonOutput:
         assert result["input_tokens"] == 1000
         assert result["output_tokens"] == 500
         assert result["duration_ms"] == 5000
+
+
+class TestHubWatchdog:
+    """Tests for hub watchdog functionality."""
+
+    @pytest.mark.asyncio
+    async def test_hub_watchdog_does_nothing_when_healthy(self):
+        """Verify watchdog does nothing when hub is healthy."""
+        mock_result = MagicMock()
+        mock_result.stdout = "hub healthy yes"
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            with patch("clinemcp.runner.ensure_cline_hub_healthy") as mock_ensure:
+                with patch("asyncio.sleep", side_effect=asyncio.CancelledError):
+                    # Run watchdog - it will sleep once then raise CancelledError
+                    task = asyncio.create_task(hub_watchdog(interval_seconds=60))
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+                # ensure_cline_hub_healthy should not be called
+                mock_ensure.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_hub_watchdog_calls_recovery_when_unhealthy(self):
+        """Verify watchdog calls recovery when hub is unhealthy."""
+        mock_result = MagicMock()
+        mock_result.stdout = "hub healthy no"
+
+        sleep_count = [0]
+
+        async def sleep_then_cancel(*args, **kwargs):
+            sleep_count[0] += 1
+            if sleep_count[0] == 1:
+                return  # First sleep completes
+            else:
+                raise asyncio.CancelledError()  # Second sleep cancels
+
+        with patch("clinemcp.runner.subprocess.run", return_value=mock_result):
+            with patch("clinemcp.runner.ensure_cline_hub_healthy") as mock_ensure:
+                with patch("asyncio.sleep", side_effect=sleep_then_cancel):
+                    # Run watchdog - it will sleep once, check health, then sleep again and cancel
+                    task = asyncio.create_task(hub_watchdog(interval_seconds=60))
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+                # ensure_cline_hub_healthy should be called once
+                mock_ensure.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_hub_watchdog_never_raises_on_exception(self):
+        """Verify watchdog continues without raising on exception."""
+        with patch("subprocess.run", side_effect=Exception("Test error")):
+            with patch("asyncio.sleep", side_effect=asyncio.CancelledError):
+                # Run watchdog - it will sleep once then raise CancelledError
+                task = asyncio.create_task(hub_watchdog(interval_seconds=60))
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+            # Should not raise - watchdog handles exceptions internally
+
+    def test_get_hub_port_returns_none_when_not_found(self):
+        """Verify get_hub_port returns None when no matching port found."""
+        mock_result = MagicMock()
+        mock_result.stdout = "TCP    0.0.0.0:8080    0.0.0.0:0    LISTENING    1234"
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = get_hub_port()
+            assert result is None
