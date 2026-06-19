@@ -1,9 +1,58 @@
 from pathlib import Path
 import logging
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 CLINERULES_FILENAME = ".clinerules"
+ROUTING_CONFIG_PATH = Path(__file__).parent.parent / "agent_routing.yaml"
+
+
+def load_routing_config() -> dict:
+    """Load agent routing config from agent_routing.yaml."""
+    if not ROUTING_CONFIG_PATH.exists():
+        return {"default": {"model": "anthropic/claude-haiku-4-5-20251001", "clinerules_template": None}}
+    with open(ROUTING_CONFIG_PATH, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def resolve_model(model: str | None = None, agent_type: str | None = None) -> str:
+    """Resolve model string from explicit model, agent_type routing, or default.
+
+    Resolution order:
+    1. If model explicitly provided → use it
+    2. Else if agent_type provided → look up in agent_routing.yaml
+    3. Else → use default from agent_routing.yaml
+    """
+    if model:
+        return model
+
+    config = load_routing_config()
+
+    if agent_type and agent_type in config:
+        return config[agent_type].get("model", config.get("default", {}).get("model", "anthropic/claude-haiku-4-5-20251001"))
+
+    # Fallback to default — never errors
+    return config.get("default", {}).get("model", "anthropic/claude-haiku-4-5-20251001")
+
+
+def get_clinerules_template_path(agent_type: str | None = None) -> Path | None:
+    """Get the .clinerules template path for an agent type. Returns None if no template."""
+    if not agent_type:
+        return None
+
+    config = load_routing_config()
+    entry = config.get(agent_type, config.get("default", {}))
+    template_rel = entry.get("clinerules_template")
+
+    if not template_rel:
+        return None
+
+    template_path = Path(__file__).parent.parent / template_rel
+    if template_path.exists():
+        return template_path
+    return None
 
 
 def _detect_stack(repo_path: Path) -> str:
@@ -59,9 +108,18 @@ Report the exact pass/fail count. Do not proceed if tests fail.
 """
 
 
-def ensure_clinerules(repo_path: str) -> dict:
+def ensure_clinerules(repo_path: str, agent_type: str | None = None) -> dict:
     """
     Check for .clinerules in repo_path. Generate if missing.
+    If agent_type is provided, merge template with existing repo rules.
+
+    Merge logic:
+    1. Load agent_type template if provided
+    2. Load existing repo .clinerules if present
+    3. If both exist: write template first, append repo rules below --- separator
+    4. If only template: write template
+    5. If only repo: leave unchanged
+    Template content always comes first. Repo-specific rules append below --- separator.
 
     Returns:
         dict with keys: repo_path, existed, path, content, stack
@@ -79,18 +137,59 @@ def ensure_clinerules(repo_path: str) -> dict:
         }
 
     clinerules_path = path / CLINERULES_FILENAME
+    template_path = get_clinerules_template_path(agent_type)
 
+    # Load existing repo .clinerules if present
+    existing_content = None
     if clinerules_path.exists():
+        existing_content = clinerules_path.read_text(encoding="utf-8")
+
+    # Load template content if agent_type specifies one
+    template_content = None
+    if template_path:
+        template_content = template_path.read_text(encoding="utf-8")
+
+    # Merge logic
+    if template_content and existing_content:
+        # Both exist: template first, repo rules below separator
+        merged = template_content.rstrip() + "\n\n---\n\n" + existing_content.lstrip()
+        clinerules_path.write_text(merged, encoding="utf-8")
+        logger.info(f"ensure_clinerules.merged: {repo_path}, agent_type={agent_type}")
+        return {
+            "repo_path": repo_path,
+            "existed": True,
+            "path": str(clinerules_path),
+            "content": merged,
+            "stack": None,
+            "error": None
+        }
+
+    if template_content and not existing_content:
+        # Only template: write it
+        clinerules_path.write_text(template_content, encoding="utf-8")
+        logger.info(f"ensure_clinerules.template_only: {repo_path}, agent_type={agent_type}")
+        return {
+            "repo_path": repo_path,
+            "existed": False,
+            "path": str(clinerules_path),
+            "content": template_content,
+            "stack": None,
+            "error": None
+        }
+
+    if existing_content:
+        # Only repo rules, no template: leave unchanged
         logger.info(f"ensure_clinerules.exists: {repo_path}")
         return {
             "repo_path": repo_path,
             "existed": True,
             "path": str(clinerules_path),
-            "content": clinerules_path.read_text(encoding="utf-8"),
+            "content": existing_content,
             "stack": None,
             "error": None
         }
 
+    # Neither exists: generate from stack detection
     stack = _detect_stack(path)
     content = _generate_clinerules(path, stack)
     clinerules_path.write_text(content, encoding="utf-8")

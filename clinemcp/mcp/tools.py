@@ -7,18 +7,26 @@ from datetime import datetime, timezone
 
 from mcp.types import Tool
 
-from clinemcp.clinerules import ensure_clinerules as _ensure_clinerules
+from clinemcp.clinerules import ensure_clinerules as _ensure_clinerules, resolve_model
 from clinemcp.runner import cancel_session, start_session
 from clinemcp.sessions import SessionStore
 from clinemcp.telegram import send_message
 
 
 async def handle_cline_start(arguments: dict) -> str:
-    """Spawn Cline session, return session_id."""
+    """Spawn Cline session, return session_id.
+
+    Model resolution order:
+    1. If model explicitly provided → use it
+    2. Else if agent_type provided → look up in agent_routing.yaml
+    3. Else → use default from agent_routing.yaml
+    """
     import os
     task = arguments.get("task", "")
-    model = arguments.get("model", "qwen2.5-coder:7b")
+    explicit_model = arguments.get("model")
+    agent_type = arguments.get("agent_type")
     cwd = arguments.get("cwd", os.environ.get("CLINE_DEFAULT_CWD", os.getcwd()))
+    model = resolve_model(model=explicit_model, agent_type=agent_type)
 
     # Check for active session (MVP: one at a time)
     store = SessionStore()
@@ -173,7 +181,8 @@ async def handle_cline_output(arguments: dict) -> str:
 async def handle_ensure_clinerules(arguments: dict) -> str:
     """Check for .clinerules in repo and generate if missing."""
     repo_path = arguments.get("repo_path", "")
-    result = _ensure_clinerules(repo_path)
+    agent_type = arguments.get("agent_type")
+    result = _ensure_clinerules(repo_path, agent_type=agent_type)
     return json.dumps(result)
 
 
@@ -216,10 +225,11 @@ def get_tool_list() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "task": {"type": "string", "description": "Full task description"},
-                    "model": {"type": "string", "description": "Ollama model"},
+                    "model": {"type": "string", "description": "Explicit model override (highest priority)"},
+                    "agent_type": {"type": "string", "description": "Agent type for routing lookup (e.g. code_transformation)"},
                     "cwd": {"type": "string", "description": "Working directory"},
                 },
-                "required": ["task", "model"],
+                "required": ["task"],
             },
         ),
         Tool(
@@ -272,8 +282,8 @@ def get_tool_list() -> list[Tool]:
             name="ensure_clinerules",
             description=(
                 "Check for .clinerules in a repo and generate one if missing. "
-                "Returns the path and content of the .clinerules file. "
-                "Never overwrites an existing .clinerules."
+                "If agent_type is provided, merges per-type template with existing repo rules. "
+                "Template content comes first, repo rules append below --- separator."
             ),
             inputSchema={
                 "type": "object",
@@ -281,6 +291,10 @@ def get_tool_list() -> list[Tool]:
                     "repo_path": {
                         "type": "string",
                         "description": "Absolute path to the repo root directory."
+                    },
+                    "agent_type": {
+                        "type": "string",
+                        "description": "Agent type for template selection (e.g. code_transformation)"
                     }
                 },
                 "required": ["repo_path"]

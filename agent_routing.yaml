@@ -1,0 +1,11 @@
+code_transformation:
+  model: groq/llama-3.1-70b-versatile
+  clinerules_template: templates/code_transformation.md
+
+code_construction:
+  model: anthropic/claude-haiku-4-5-20251001
+  clinerules_template: templates/code_construction.md
+
+default:
+  model: anthropic/claude-haiku-4-5-20251001
+  clinerules_template: null
