@@ -96,11 +96,21 @@ async def start_session(
     logger.info(f"Session {session_id} marked as running")
 
     # Build command (asyncio.create_subprocess_exec only — never shell=True)
+    # Model injection: Cline CLI accepts --model and --provider as flags.
+    # If model string contains "/" (e.g. "groq/llama-3.1-70b-versatile"),
+    # the prefix is the provider and the suffix is the model name.
+    # Bare model names (e.g. "qwen2.5-coder:7b") default to ollama provider.
+    if "/" in model:
+        provider, model_name = model.split("/", 1)
+    else:
+        provider = "ollama"
+        model_name = model
+
     cmd = [
         CLINE_PATH,
         task,
-        "--provider", "ollama",
-        "--model", model,
+        "--provider", provider,
+        "--model", model_name,
         "--auto-approve", "true",
         "--cwd", cwd,
         "--timeout", str(DEFAULT_TIMEOUT),
