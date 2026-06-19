@@ -121,27 +121,44 @@ async def start_session(
 
         try:
             logger.info(f"Waiting for subprocess {session_id} to complete...")
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=DEFAULT_TIMEOUT + 30
-            )
-            output = stdout.decode("utf-8", errors="replace") + stderr.decode(
-                "utf-8", errors="replace"
-            )
-            exit_code = proc.returncode
-            status = "complete" if exit_code == 0 else "failed"
-            logger.info(f"Subprocess {session_id} completed with exit code: {exit_code}, status: {status}")
+            output_lines = []
+            try:
+                async with asyncio.timeout(DEFAULT_TIMEOUT + 30):
+                    async for raw_line in proc.stdout:
+                        line = raw_line.decode("utf-8", errors="replace")
+                        output_lines.append(line)
+                        try:
+                            await sessions.append_output(session_id, line)
+                        except Exception as e:
+                            logger.error("runner.append_output_failed", error=str(e))
 
-            # Parse JSON output for enriched session data
-            parsed = _parse_json_output(output)
-            logger.info(f"Parsed output: iterations={parsed.get('iterations')}, tokens={parsed.get('input_tokens')}/{parsed.get('output_tokens')}")
+                    # Drain stderr after stdout closes
+                    stderr_bytes = await proc.stderr.read()
+                    if stderr_bytes:
+                        err_line = stderr_bytes.decode("utf-8", errors="replace")
+                        output_lines.append(err_line)
+                        try:
+                            await sessions.append_output(session_id, err_line)
+                        except Exception as e:
+                            logger.error("runner.append_stderr_failed", error=str(e))
 
-        except asyncio.TimeoutError:
-            logger.error(f"Session {session_id} timed out")
-            proc.kill()
-            output = "Session timed out"
-            exit_code = -1
-            status = "failed"
-            parsed = {}
+                await proc.wait()
+                output = "".join(output_lines)
+                exit_code = proc.returncode
+                status = "complete" if exit_code == 0 else "failed"
+                logger.info(f"Subprocess {session_id} completed with exit code: {exit_code}, status: {status}")
+
+                # Parse JSON output for enriched session data
+                parsed = _parse_json_output(output)
+                logger.info(f"Parsed output: iterations={parsed.get('iterations')}, tokens={parsed.get('input_tokens')}/{parsed.get('output_tokens')}")
+
+            except asyncio.TimeoutError:
+                logger.error(f"Session {session_id} timed out")
+                proc.kill()
+                output = "".join(output_lines) + "\nSession timed out."
+                exit_code = -1
+                status = "failed"
+                parsed = {}
 
         except Exception as e:
             logger.error(f"Exception during subprocess execution for {session_id}: {e}")

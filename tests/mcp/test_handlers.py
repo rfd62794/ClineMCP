@@ -11,6 +11,7 @@ from clinemcp.mcp.tools import (
     handle_cline_output,
     handle_cline_start,
     handle_cline_status,
+    handle_cline_tail,
 )
 
 
@@ -259,3 +260,56 @@ class TestClineOutput:
             assert data["duration_ms"] == 15000
             assert data["input_tokens"] == 1000
             assert data["output_tokens"] == 500
+
+
+class TestClineTail:
+    """Tests for cline_tail tool."""
+
+    @pytest.mark.asyncio
+    async def test_cline_tail_returns_last_n_lines(self):
+        """Verify session with 30 lines output — lines=10 returns last 10."""
+        with patch("clinemcp.sessions.SessionStore") as mock_store_class:
+            mock_store = MagicMock()
+            mock_store.init_db = AsyncMock()
+            # Create 30 lines of output
+            output_lines = [f"line{i}" for i in range(30)]
+            output = "\n".join(output_lines)
+            mock_store.get_session = AsyncMock(
+                return_value={
+                    "session_id": "test-123",
+                    "status": "complete",
+                    "output": output,
+                    "error": None,
+                    "exit_code": 0,
+                    "floor_result": None,
+                }
+            )
+            mock_store_class.return_value = mock_store
+
+            result = await handle_cline_tail({"session_id": "test-123", "lines": 10})
+            data = json.loads(result)
+
+            assert data["session_id"] == "test-123"
+            assert data.get("status") == "complete"
+            assert data["total_lines"] == 30
+            # Should return last 10 lines
+            tail_lines = data["tail"].split("\n")
+            assert len(tail_lines) == 10
+            assert tail_lines[0] == "line20"
+            assert tail_lines[-1] == "line29"
+
+    @pytest.mark.asyncio
+    async def test_cline_tail_returns_error_for_unknown_session(self):
+        """Verify unknown session_id — error field set, tail empty."""
+        with patch("clinemcp.sessions.SessionStore") as mock_store_class:
+            mock_store = MagicMock()
+            mock_store.init_db = AsyncMock()
+            mock_store.get_session = AsyncMock(return_value=None)
+            mock_store_class.return_value = mock_store
+
+            result = await handle_cline_tail({"session_id": "unknown-id"})
+            data = json.loads(result)
+
+            assert data["session_id"] == "unknown-id"
+            assert data["tail"] == ""
+            assert data["error"] == "session not found"

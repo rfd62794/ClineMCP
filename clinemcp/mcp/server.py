@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
         handle_cline_start,
         handle_cline_status,
         handle_ensure_clinerules,
+        handle_cline_tail,
     )
 
     @mcp_server.list_tools()
@@ -68,6 +69,7 @@ async def lifespan(app: FastAPI):
             "cline_cancel": handle_cline_cancel,
             "cline_output": handle_cline_output,
             "ensure_clinerules": handle_ensure_clinerules,
+            "cline_tail": handle_cline_tail,
         }
         handler = handlers.get(name)
         if not handler:

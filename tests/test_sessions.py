@@ -165,3 +165,27 @@ class TestStartupCleanup:
         assert s2["status"] == "failed"
         assert s2["error"] == "ClineMCP restarted"
         assert s3["status"] == "complete"
+
+
+class TestAppendOutput:
+    """Tests for append_output function."""
+
+    @pytest.mark.asyncio
+    async def test_append_output_writes_to_db(self, temp_db):
+        """Verify single line appended — retrieved output contains that line."""
+        await temp_db.create_session("test-append", "task", "model", "cwd")
+        await temp_db.append_output("test-append", "line1\n")
+        
+        session = await temp_db.get_session("test-append")
+        assert session["output"] == "line1\n"
+
+    @pytest.mark.asyncio
+    async def test_append_output_accumulates_lines(self, temp_db):
+        """Verify multiple append_output calls — output contains all lines in order."""
+        await temp_db.create_session("test-accumulate", "task", "model", "cwd")
+        await temp_db.append_output("test-accumulate", "line1\n")
+        await temp_db.append_output("test-accumulate", "line2\n")
+        await temp_db.append_output("test-accumulate", "line3\n")
+        
+        session = await temp_db.get_session("test-accumulate")
+        assert session["output"] == "line1\nline2\nline3\n"

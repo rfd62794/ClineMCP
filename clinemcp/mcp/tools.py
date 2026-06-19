@@ -177,6 +177,35 @@ async def handle_ensure_clinerules(arguments: dict) -> str:
     return json.dumps(result)
 
 
+async def handle_cline_tail(arguments: dict) -> str:
+    """Return the last N lines of a running or completed session's output."""
+    from clinemcp.sessions import SessionStore
+
+    session_id = arguments.get("session_id", "")
+    lines = arguments.get("lines", 20)
+
+    store = SessionStore()
+    await store.init_db()
+
+    session = await store.get_session(session_id)
+    if not session:
+        return json.dumps({
+            "session_id": session_id,
+            "tail": "",
+            "error": "session not found"
+        })
+
+    output = session.get("output") or ""
+    tail_lines = output.splitlines()[-lines:]
+    return json.dumps({
+        "session_id": session_id,
+        "status": session.get("status"),
+        "tail": "\n".join(tail_lines),
+        "total_lines": len(output.splitlines()),
+        "error": None
+    })
+
+
 def get_tool_list() -> list[Tool]:
     """Return list of MCP tool definitions."""
     return [
@@ -255,6 +284,29 @@ def get_tool_list() -> list[Tool]:
                     }
                 },
                 "required": ["repo_path"]
+            }
+        ),
+        Tool(
+            name="cline_tail",
+            description=(
+                "Return the last N lines of a running or completed session's output. "
+                "Poll every 1-3 seconds during active sessions for near real-time visibility. "
+                "Returns empty string if no output yet."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Session ID returned by cline_start."
+                    },
+                    "lines": {
+                        "type": "integer",
+                        "description": "Number of lines to return from the end. Default 20.",
+                        "default": 20
+                    }
+                },
+                "required": ["session_id"]
             }
         ),
     ]

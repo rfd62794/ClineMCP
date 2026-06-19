@@ -184,3 +184,22 @@ class SessionStore:
             )
             await db.commit()
             return cursor.rowcount
+
+    async def append_output(self, session_id: str, line: str) -> None:
+        """Append a single line to the session's output column."""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    """
+                    UPDATE sessions
+                    SET output = COALESCE(output, '') || ?
+                    WHERE session_id = ?
+                    """,
+                    (line, session_id)
+                )
+                await db.commit()
+        except Exception as e:
+            # Never raise - log and continue to avoid breaking streaming loop
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"append_output failed for session {session_id}: {e}")
